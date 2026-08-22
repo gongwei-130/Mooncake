@@ -107,6 +107,32 @@ class MasterServiceTest : public ::testing::Test {
         return service.ProcessClientOffboardingJob(job);
     }
 
+    ErrorCode PrepareUnmountSegmentForTest(MasterService& service,
+                                           const UUID& segment_id,
+                                           size_t& metrics_dec_capacity) {
+        auto access = service.segment_manager_.getSegmentAccess();
+        return access.PrepareUnmountSegment(segment_id,
+                                            metrics_dec_capacity);
+    }
+
+    ErrorCode CommitUnmountSegmentForTest(MasterService& service,
+                                          const UUID& segment_id,
+                                          const UUID& client_id,
+                                          size_t metrics_dec_capacity) {
+        auto access = service.segment_manager_.getSegmentAccess();
+        return access.CommitUnmountSegment(segment_id, client_id,
+                                           metrics_dec_capacity);
+    }
+
+    std::chrono::seconds ClientOffboardingRetryDelayForTest(
+        uint64_t retry_count) {
+        return ClientOffboardingWorker::RetryDelay(retry_count);
+    }
+
+    bool ClientOffboardingShouldAlertForTest(uint64_t retry_count) {
+        return ClientOffboardingWorker::ShouldAlert(retry_count);
+    }
+
     void ExpectKeyHiddenFromReadApis(MasterService& service,
                                      const std::string& key) {
         auto get = service.GetReplicaList(key, TenantId::Default());
@@ -2945,7 +2971,7 @@ TEST_F(MasterServiceTest, CopyStart) {
     [[maybe_unused]] const auto context4 =
         PrepareSimpleSegment(*service_, "segment_4");
 
-    UUID client_id = generate_uuid();
+    const UUID client_id = context1.client_id;
 
     // Test Case 1: CopyStart a non-existent key, should fail.
     auto copy_result =
@@ -3087,8 +3113,8 @@ TEST_F(MasterServiceTest, CopyEnd) {
     [[maybe_unused]] const auto context3 =
         PrepareSimpleSegment(*service_, "segment_3");
 
-    UUID client_id = generate_uuid();
-    UUID invalid_client_id = generate_uuid();
+    const UUID client_id = context1.client_id;
+    const UUID invalid_client_id = context2.client_id;
 
     // Test Case 1: CopyEnd a non-existent key, should fail.
     auto copy_end_result =
@@ -3200,8 +3226,8 @@ TEST_F(MasterServiceTest, CopyRevoke) {
     [[maybe_unused]] const auto context2 =
         PrepareSimpleSegment(*service_, "segment_2");
 
-    UUID client_id = generate_uuid();
-    UUID invalid_client_id = generate_uuid();
+    const UUID client_id = context1.client_id;
+    const UUID invalid_client_id = context2.client_id;
 
     // Test Case 1: CopyRevoke a non-existent key, should fail.
     auto copy_revoke_result = service_->CopyRevoke(
@@ -3297,7 +3323,7 @@ TEST_F(MasterServiceTest, MoveStart) {
     [[maybe_unused]] const auto context3 =
         PrepareSimpleSegment(*service_, "segment_3");
 
-    UUID client_id = generate_uuid();
+    const UUID client_id = context1.client_id;
 
     // Test Case 1: MoveStart a non-existent key, should fail.
     auto move_start_result =
@@ -3438,8 +3464,8 @@ TEST_F(MasterServiceTest, MoveEnd) {
     [[maybe_unused]] const auto context2 =
         PrepareSimpleSegment(*service_, "segment_2");
 
-    UUID client_id = generate_uuid();
-    UUID invalid_client_id = generate_uuid();
+    const UUID client_id = context1.client_id;
+    const UUID invalid_client_id = context2.client_id;
 
     // Test Case 1: MoveEnd a non-existent key, should fail.
     auto move_end_result =
@@ -3575,8 +3601,8 @@ TEST_F(MasterServiceTest, MoveRevoke) {
     [[maybe_unused]] const auto context2 =
         PrepareSimpleSegment(*service_, "segment_2");
 
-    UUID client_id = generate_uuid();
-    UUID invalid_client_id = generate_uuid();
+    const UUID client_id = context1.client_id;
+    const UUID invalid_client_id = context2.client_id;
 
     // Test Case 1: MoveRevoke a non-existent key, should fail.
     auto move_revoke_result = service_->MoveRevoke(
@@ -3677,7 +3703,7 @@ TEST_F(MasterServiceTest, ProtectCopyMoveSourceFromEviction) {
     [[maybe_unused]] const auto context2 =
         PrepareSimpleSegment(*service_, "segment_2", kBaseAddr, kSegmentSize);
 
-    UUID client_id = generate_uuid();
+    const UUID client_id = context1.client_id;
 
     const std::string copy_key = "copy_key";
     const std::string move_key = "move_key";
@@ -3764,7 +3790,7 @@ TEST_F(MasterServiceTest, DiscardTimeoutCopyMove) {
     [[maybe_unused]] const auto context2 =
         PrepareSimpleSegment(*service_, "segment_2", kBaseAddr, kSegmentSize);
 
-    UUID client_id = generate_uuid();
+    const UUID client_id = context1.client_id;
 
     const std::string copy_key = "copy_key";
     const std::string move_key = "move_key";
@@ -4516,7 +4542,7 @@ TEST_F(MasterServiceTest, CopyInProgressDoesNotKeepUnmountedSourceVisible) {
     PrepareSimpleSegment(*service, "copy_target",
                          kDefaultSegmentBase + kDefaultSegmentSize);
 
-    const UUID client_id = generate_uuid();
+    const UUID client_id = source.client_id;
     ReplicateConfig config;
     config.replica_num = 1;
     config.preferred_segment = "copy_source";
@@ -4544,7 +4570,7 @@ TEST_F(MasterServiceTest, MoveInProgressDoesNotKeepUnmountedSourceVisible) {
     PrepareSimpleSegment(*service, "move_target",
                          kDefaultSegmentBase + kDefaultSegmentSize);
 
-    const UUID client_id = generate_uuid();
+    const UUID client_id = source.client_id;
     ReplicateConfig config;
     config.replica_num = 1;
     config.preferred_segment = "move_source";
@@ -7815,7 +7841,7 @@ TEST_F(MasterServiceTest, UpsertConflictReplicationTask) {
         PrepareSimpleSegment(*service_, "segment_1");
     [[maybe_unused]] const auto ctx2 =
         PrepareSimpleSegment(*service_, "segment_2");
-    UUID client_id = generate_uuid();
+    const UUID client_id = ctx1.client_id;
 
     std::string key = "upsert_conflict_copy";
     uint64_t slice_length = 1024;
@@ -8068,6 +8094,43 @@ TEST_F(MasterServiceTest, HardPinDefaultIsFalse) {
 
 // ===================== Client Offboarding Tests =====================
 
+TEST_F(MasterServiceTest, ClientOffboardingRetryPolicy) {
+    EXPECT_EQ(ClientOffboardingRetryDelayForTest(1), std::chrono::seconds(1));
+    EXPECT_EQ(ClientOffboardingRetryDelayForTest(2), std::chrono::seconds(2));
+    EXPECT_EQ(ClientOffboardingRetryDelayForTest(3), std::chrono::seconds(4));
+    EXPECT_EQ(ClientOffboardingRetryDelayForTest(4), std::chrono::seconds(8));
+    EXPECT_EQ(ClientOffboardingRetryDelayForTest(5),
+              std::chrono::seconds(16));
+    EXPECT_EQ(ClientOffboardingRetryDelayForTest(6),
+              std::chrono::seconds(30));
+    EXPECT_EQ(ClientOffboardingRetryDelayForTest(100),
+              std::chrono::seconds(30));
+    EXPECT_FALSE(ClientOffboardingShouldAlertForTest(9));
+    EXPECT_TRUE(ClientOffboardingShouldAlertForTest(10));
+    EXPECT_TRUE(ClientOffboardingShouldAlertForTest(11));
+}
+
+TEST_F(MasterServiceTest, ReMountDoesNotRecoverSuspectedClient) {
+    MasterService service;
+    auto segment = MakeSegment("suspected_remount_segment");
+    const UUID client_id = generate_uuid();
+    ASSERT_TRUE(service.MountSegment(segment, client_id).has_value());
+
+    const auto liveness = FindClientLivenessForTest(service, client_id);
+    ASSERT_TRUE(liveness);
+    ASSERT_EQ(liveness->Evaluate(ClientLivenessRecord::Clock::now(),
+                                 std::chrono::seconds::zero(),
+                                 std::chrono::hours(1)),
+              ClientLivenessTransition::BECAME_SUSPECTED);
+    MasterMetricManager::instance().client_liveness_became_suspected();
+
+    ASSERT_TRUE(service.ReMountSegment({segment}, client_id).has_value());
+    EXPECT_EQ(liveness->state(), ClientLivenessState::SUSPECTED);
+    EXPECT_EQ(service.Ping(client_id)->client_status,
+              ClientStatus::OK);
+    EXPECT_EQ(liveness->state(), ClientLivenessState::ACTIVE);
+}
+
 TEST_F(MasterServiceTest,
        ClientOffboardingProcessesRealSegmentAndMetadataResiduals) {
     MasterService service;
@@ -8111,10 +8174,11 @@ TEST_F(MasterServiceTest,
     ASSERT_TRUE(
         service.MountSegment(prepared_segment, client_id).has_value());
     ASSERT_TRUE(service.MountSegment(blocked_segment, client_id).has_value());
-    ASSERT_TRUE(service
-                    .GracefulUnmountSegment(blocked_segment.id, client_id,
-                                             /*grace_period_ms=*/60'000)
-                    .has_value());
+    size_t blocked_metrics_dec_capacity = 0;
+    ASSERT_EQ(ErrorCode::OK,
+              PrepareUnmountSegmentForTest(
+                  service, blocked_segment.id,
+                  blocked_metrics_dec_capacity));
 
     ClientOffboardingJob job;
     job.client_id = client_id;
@@ -8143,6 +8207,15 @@ TEST_F(MasterServiceTest,
     EXPECT_EQ(job.prepared_segments.front().segment_id, prepared_segment.id);
     EXPECT_EQ(job.prepared_segments.front().metrics_dec_capacity,
               retained_capacity);
+
+    ASSERT_EQ(ErrorCode::OK,
+              CommitUnmountSegmentForTest(
+                  service, blocked_segment.id, client_id,
+                  blocked_metrics_dec_capacity));
+    ASSERT_TRUE(ProcessClientOffboardingForTest(service, job));
+    EXPECT_TRUE(job.prepared_segments.empty());
+    EXPECT_TRUE(job.pending_prepare_segments.empty());
+    EXPECT_FALSE(FindClientLivenessForTest(service, client_id));
 }
 
 // ===================== Graceful Unmount Tests =====================
@@ -8262,19 +8335,21 @@ TEST_F(MasterServiceTest,
                     ->GracefulUnmountSegment(old_segment.id, client_id,
                                              /*grace_period_ms=*/50)
                     .has_value());
-    ASSERT_TRUE(service_->MountSegment(new_segment, client_id).has_value());
+    auto reused_name_result = service_->MountSegment(new_segment, client_id);
+    ASSERT_FALSE(reused_name_result.has_value());
+    EXPECT_EQ(ErrorCode::INVALID_PARAMS, reused_name_result.error());
 
     auto old_status = service_->QuerySegmentStatusById(old_segment.id);
     ASSERT_TRUE(old_status.has_value());
     EXPECT_EQ(old_status.value(), SegmentStatus::GRACEFULLY_UNMOUNTING);
 
     auto new_status = service_->QuerySegmentStatusById(new_segment.id);
-    ASSERT_TRUE(new_status.has_value());
-    EXPECT_EQ(new_status.value(), SegmentStatus::OK);
+    EXPECT_FALSE(new_status.has_value());
 
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
 
     EXPECT_FALSE(service_->QuerySegmentStatusById(old_segment.id).has_value());
+    ASSERT_TRUE(service_->MountSegment(new_segment, client_id).has_value());
     ASSERT_TRUE(service_->QuerySegmentStatusById(new_segment.id).has_value());
 
     auto status_by_name = service_->QuerySegmentStatus(new_segment.name);
