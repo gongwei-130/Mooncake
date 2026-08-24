@@ -3235,10 +3235,6 @@ tl::expected<void, ErrorCode> MasterService::RestoreFromStandbySnapshot(
     // The ordered writer initializes its sequence from durable_prefix.
     std::unique_lock<std::shared_mutex> client_lock(client_mutex_);
     std::unique_lock<std::shared_mutex> snapshot_lock(snapshot_mutex_);
-    const auto restore_gate = std::make_shared<ClientLivenessRecord>(
-        ClientLivenessRecord::Clock::now());
-    const auto nof_restore_gate = std::make_shared<ClientLivenessRecord>(
-        ClientLivenessRecord::Clock::now());
     std::unordered_map<UUID, std::shared_ptr<ClientLivenessRecord>,
                        boost::hash<UUID>>
         new_known_owner_records;
@@ -3391,7 +3387,6 @@ tl::expected<void, ErrorCode> MasterService::RestoreFromStandbySnapshot(
                 auto alloc = restored_allocators.at(buffer.transport_endpoint_);
                 auto restored_buffer =
                     std::make_unique<AllocatedBuffer>(alloc, buffer);
-                restored_buffer->bindClientLiveness(restore_gate);
                 replicas.emplace_back(std::move(restored_buffer), desc.status);
             } else if (desc.is_nof_replica()) {
                 const auto& buffer =
@@ -3409,7 +3404,6 @@ tl::expected<void, ErrorCode> MasterService::RestoreFromStandbySnapshot(
                 }
                 auto restored_buffer =
                     std::make_unique<AllocatedBuffer>(alloc, buffer);
-                restored_buffer->bindClientLiveness(nof_restore_gate);
                 replicas.emplace_back(std::move(restored_buffer), desc.status,
                                       ReplicaType::NOF_SSD);
             } else if (desc.is_disk_replica()) {
