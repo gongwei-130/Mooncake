@@ -111,8 +111,7 @@ class MasterServiceTest : public ::testing::Test {
                                            const UUID& segment_id,
                                            size_t& metrics_dec_capacity) {
         auto access = service.segment_manager_.getSegmentAccess();
-        return access.PrepareUnmountSegment(segment_id,
-                                            metrics_dec_capacity);
+        return access.PrepareUnmountSegment(segment_id, metrics_dec_capacity);
     }
 
     ErrorCode CommitUnmountSegmentForTest(MasterService& service,
@@ -8099,10 +8098,8 @@ TEST_F(MasterServiceTest, ClientOffboardingRetryPolicy) {
     EXPECT_EQ(ClientOffboardingRetryDelayForTest(2), std::chrono::seconds(2));
     EXPECT_EQ(ClientOffboardingRetryDelayForTest(3), std::chrono::seconds(4));
     EXPECT_EQ(ClientOffboardingRetryDelayForTest(4), std::chrono::seconds(8));
-    EXPECT_EQ(ClientOffboardingRetryDelayForTest(5),
-              std::chrono::seconds(16));
-    EXPECT_EQ(ClientOffboardingRetryDelayForTest(6),
-              std::chrono::seconds(30));
+    EXPECT_EQ(ClientOffboardingRetryDelayForTest(5), std::chrono::seconds(16));
+    EXPECT_EQ(ClientOffboardingRetryDelayForTest(6), std::chrono::seconds(30));
     EXPECT_EQ(ClientOffboardingRetryDelayForTest(100),
               std::chrono::seconds(30));
     EXPECT_FALSE(ClientOffboardingShouldAlertForTest(9));
@@ -8118,16 +8115,15 @@ TEST_F(MasterServiceTest, ReMountDoesNotRecoverSuspectedClient) {
 
     const auto liveness = FindClientLivenessForTest(service, client_id);
     ASSERT_TRUE(liveness);
-    ASSERT_EQ(liveness->Evaluate(ClientLivenessRecord::Clock::now(),
-                                 std::chrono::seconds::zero(),
-                                 std::chrono::hours(1)),
-              ClientLivenessTransition::BECAME_SUSPECTED);
+    ASSERT_EQ(
+        liveness->Evaluate(ClientLivenessRecord::Clock::now(),
+                           std::chrono::seconds::zero(), std::chrono::hours(1)),
+        ClientLivenessTransition::BECAME_SUSPECTED);
     MasterMetricManager::instance().client_liveness_became_suspected();
 
     ASSERT_TRUE(service.ReMountSegment({segment}, client_id).has_value());
     EXPECT_EQ(liveness->state(), ClientLivenessState::SUSPECTED);
-    EXPECT_EQ(service.Ping(client_id)->client_status,
-              ClientStatus::OK);
+    EXPECT_EQ(service.Ping(client_id)->client_status, ClientStatus::OK);
     EXPECT_EQ(liveness->state(), ClientLivenessState::ACTIVE);
 }
 
@@ -8171,14 +8167,12 @@ TEST_F(MasterServiceTest,
     auto prepared_segment = MakeSegment("offboarding_prepared_segment");
     auto blocked_segment =
         MakeSegment("offboarding_blocked_segment", /*base=*/0x400000000);
-    ASSERT_TRUE(
-        service.MountSegment(prepared_segment, client_id).has_value());
+    ASSERT_TRUE(service.MountSegment(prepared_segment, client_id).has_value());
     ASSERT_TRUE(service.MountSegment(blocked_segment, client_id).has_value());
     size_t blocked_metrics_dec_capacity = 0;
     ASSERT_EQ(ErrorCode::OK,
-              PrepareUnmountSegmentForTest(
-                  service, blocked_segment.id,
-                  blocked_metrics_dec_capacity));
+              PrepareUnmountSegmentForTest(service, blocked_segment.id,
+                                           blocked_metrics_dec_capacity));
 
     ClientOffboardingJob job;
     job.client_id = client_id;
@@ -8208,10 +8202,9 @@ TEST_F(MasterServiceTest,
     EXPECT_EQ(job.prepared_segments.front().metrics_dec_capacity,
               retained_capacity);
 
-    ASSERT_EQ(ErrorCode::OK,
-              CommitUnmountSegmentForTest(
-                  service, blocked_segment.id, client_id,
-                  blocked_metrics_dec_capacity));
+    ASSERT_EQ(ErrorCode::OK, CommitUnmountSegmentForTest(
+                                 service, blocked_segment.id, client_id,
+                                 blocked_metrics_dec_capacity));
     ASSERT_TRUE(ProcessClientOffboardingForTest(service, job));
     EXPECT_TRUE(job.prepared_segments.empty());
     EXPECT_TRUE(job.pending_prepare_segments.empty());
