@@ -624,12 +624,7 @@ class Replica {
     }
 
     void rollback_removed_to_complete() {
-        if (status_ == ReplicaStatus::REMOVED) {
-            status_ = ReplicaStatus::COMPLETE;
-        } else {
-            LOG(ERROR) << "Cannot rollback removed replica from status: "
-                       << status_;
-        }
+        status_ = ReplicaStatus::COMPLETE;
     }
 
     void inc_refcnt() { refcnt_.fetch_add(1); }

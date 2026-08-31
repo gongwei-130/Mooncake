@@ -8128,6 +8128,38 @@ TEST_F(MasterServiceTest, ReMountDoesNotRecoverSuspectedClient) {
 }
 
 TEST_F(MasterServiceTest,
+       InPlaceUpsertRejectsSuspectedTargetWithoutChangingMetadata) {
+    MasterService service;
+    auto segment = MakeSegment("suspected_upsert_segment");
+    const UUID client_id = generate_uuid();
+    ASSERT_TRUE(service.MountSegment(segment, client_id).has_value());
+
+    const auto key = PutObjectOnSegment(service, client_id, segment.name);
+    ReplicateConfig config;
+    config.replica_num = 1;
+    config.preferred_segment = segment.name;
+
+    const auto liveness = FindClientLivenessForTest(service, client_id);
+    ASSERT_TRUE(liveness);
+    ASSERT_EQ(
+        liveness->Evaluate(ClientLivenessRecord::Clock::now(),
+                           std::chrono::seconds::zero(), std::chrono::hours(1)),
+        ClientLivenessTransition::BECAME_SUSPECTED);
+    MasterMetricManager::instance().client_liveness_became_suspected();
+
+    auto upsert = service.UpsertStart(client_id, key, TenantId::Default(), 1024,
+                                      config);
+    ASSERT_FALSE(upsert.has_value());
+    EXPECT_EQ(upsert.error(), ErrorCode::UNAVAILABLE_IN_CURRENT_STATUS);
+
+    ASSERT_TRUE(service.Ping(client_id).has_value());
+    auto get = service.GetReplicaList(key, TenantId::Default());
+    ASSERT_TRUE(get.has_value()) << toString(get.error());
+    ASSERT_EQ(get->replicas.size(), 1u);
+    EXPECT_EQ(get->replicas.front().status, ReplicaStatus::COMPLETE);
+}
+
+TEST_F(MasterServiceTest,
        ClientOffboardingProcessesRealSegmentAndMetadataResiduals) {
     MasterService service;
     auto segment = MakeSegment("offboarding_segment");
@@ -8328,21 +8360,19 @@ TEST_F(MasterServiceTest,
                     ->GracefulUnmountSegment(old_segment.id, client_id,
                                              /*grace_period_ms=*/50)
                     .has_value());
-    auto reused_name_result = service_->MountSegment(new_segment, client_id);
-    ASSERT_FALSE(reused_name_result.has_value());
-    EXPECT_EQ(ErrorCode::INVALID_PARAMS, reused_name_result.error());
+    ASSERT_TRUE(service_->MountSegment(new_segment, client_id).has_value());
 
     auto old_status = service_->QuerySegmentStatusById(old_segment.id);
     ASSERT_TRUE(old_status.has_value());
     EXPECT_EQ(old_status.value(), SegmentStatus::GRACEFULLY_UNMOUNTING);
 
     auto new_status = service_->QuerySegmentStatusById(new_segment.id);
-    EXPECT_FALSE(new_status.has_value());
+    ASSERT_TRUE(new_status.has_value());
+    EXPECT_EQ(new_status.value(), SegmentStatus::OK);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
 
     EXPECT_FALSE(service_->QuerySegmentStatusById(old_segment.id).has_value());
-    ASSERT_TRUE(service_->MountSegment(new_segment, client_id).has_value());
     ASSERT_TRUE(service_->QuerySegmentStatusById(new_segment.id).has_value());
 
     auto status_by_name = service_->QuerySegmentStatus(new_segment.name);
